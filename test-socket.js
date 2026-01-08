@@ -1,7 +1,8 @@
 import { io } from "socket.io-client";
 
-const SOCKET_URL = "https://cointradingbot-backend.chainbull.net/"; // your server URL
-const USER_ID = "1"; // replace with a real user ID
+// const SOCKET_URL = "https://cointradingbot-backend.chainbull.net/"; // your server URL
+const SOCKET_URL = "https://localhost:4000/"; // your server URL
+const USER_ID = "3"; // replace with a real user ID
 
 const socket = io(SOCKET_URL);
 
