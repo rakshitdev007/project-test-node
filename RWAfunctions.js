@@ -9,40 +9,59 @@ const RPC_URL = process.env.RPC_BNB;
 export const provider = new ethers.JsonRpcProvider(RPC_URL);
 
 export const ADDRESSES = {
-  RWAManager: "0xc370093A31ec14cF20EBa0513fcf221bd29FD152",
-  LegalRegistry: "0xccf812cCaEE90E3cd97d637F17779696Eb8965f1",
-  IdentityRegistry: "0xFcd2f30F64CA11828f45922E924A88de31EE902B",
+  RWAManager: "0x09f4d865A607d655D84EEDf238809851788D4E66",
+  LegalRegistry: "0xaD7aA9d3d97C197d348515355A2e95eF55A396E7",
+  IdentityRegistry: "0x2DeE24E629e0135070d84164D38fbB35E2206148",
 };
 
 /* ============================================================
-   ABIs (MINIMAL + ERRORS)
+   ABIs (LATEST + EXACT)
 ============================================================ */
 
+/* ---------- RWAManager ---------- */
 export const RWAManagerABI = [
-  "function createRWA((string,string,uint256,address,address[],uint256[],uint256,address)) returns (address)",
+  "function createRWA(string name,string symbol,uint256 assetId,address[] initialOwners,uint256[] mintAmounts) returns (address)",
   "function rwaByAsset(uint256) view returns (address)",
+  "function totalRWAs() view returns (uint256)",
+  "function getAllRWATokens() view returns (address[])",
+  "function getRWATokens(uint256 page,uint256 limit) view returns (address[])",
+
+  "error ZeroAddress()",
   "error AssetNotApproved()",
   "error AlreadyTokenized()",
+  "error InvalidDistribution()",
+  "error IdentityMissing(address)",
+  "error CountryMismatch(address,string,string)",
 ];
 
+/* ---------- LegalRegistry ---------- */
 export const LegalRegistryABI = [
-  "function requestAsset(string,string) returns (uint256)",
+  "function requestAsset(string countryCode,string documentURI) returns (uint256)",
+  "function reRequestAsset(uint256,string,string)",
   "function approve(uint256)",
   "function disapprove(uint256,string)",
   "function isAssetApproved(uint256) view returns (bool)",
   "function getAsset(uint256) view returns (address,string,string,uint8)",
-  "function getTotalAssets() view returns (uint256)",
+  "function totalAssets() view returns (uint256)",
+
   "error InvalidStatus()",
   "error NotOwner()",
+  "error IdentityNotVerified()",
+  "error JurisdictionMismatch()",
 ];
 
+/* ---------- IdentityRegistry ---------- */
 export const IdentityRegistryABI = [
-  "function registerIdentity(address,string)",
+  "function registerIdentity(address,uint256,string,string,uint8,uint8,uint8)",
+  "function updateIdentity(address,uint256,string,string,uint8,uint8,uint8)",
   "function revokeIdentity(address)",
-  "function hasIdentity(address) view returns (bool)",
-  "error IdentityAlreadyExists()",
-  "error IdentityDoesNotExist()",
+  "function hasValidIdentity(address) view returns (bool)",
+  "function getIdentity(address) view returns (tuple(uint256 verifiedTill,string identityURI,string countryCode,uint8 level,uint8 risk,uint8 class))",
+
   "error ZeroAddress()",
+  "error IdentityAlreadyVerified()",
+  "error IdentityDoesNotExist()",
+  "error IdentityInvalid(address)",
 ];
 
 /* ============================================================
@@ -76,58 +95,82 @@ function getContracts(privateKey) {
   };
 }
 
-/**
- * Universal revert decoder
- */
-export function decodeError(err, abiList = []) {
-  const allAbis = [...RWAManagerABI, ...LegalRegistryABI, ...IdentityRegistryABI, ...abiList];
+/* ============================================================
+   ERROR DECODER
+============================================================ */
 
+export function decodeError(err, extraAbi = []) {
   try {
-    const iface = new ethers.Interface(allAbis);
+    const iface = new ethers.Interface([
+      ...RWAManagerABI,
+      ...LegalRegistryABI,
+      ...IdentityRegistryABI,
+      ...extraAbi,
+    ]);
+
     const decoded = iface.parseError(err.data);
     return { name: decoded.name, args: decoded.args };
   } catch {
-    return { raw: err.data || err };
+    return { raw: err?.data || err };
   }
 }
 
 /* ============================================================
-   IDENTITY REGISTRY FUNCTIONS
+   IDENTITY REGISTRY
 ============================================================ */
 
-export async function registerIdentity(privateKey, user, identityURI) {
+export async function registerIdentity(
+  privateKey,
+  {
+    user,
+    verifiedTill,
+    identityURI,
+    countryCode,   // e.g. "+91", "IN"
+    level,         // 0,1,2
+    risk,          // 0,1,2
+    investorClass, // 0,1,2
+  }
+) {
   const { identityRegistry } = getContracts(privateKey);
   try {
-    const tx = await identityRegistry.registerIdentity(user, identityURI);
+    const tx = await identityRegistry.registerIdentity(
+      user,
+      verifiedTill,
+      identityURI,
+      countryCode,
+      level,
+      risk,
+      investorClass
+    );
     return await tx.wait();
   } catch (err) {
     throw decodeError(err);
   }
 }
 
-export async function hasIdentity(user) {
+export async function getIdentity(user) {
   const identityRegistry = new ethers.Contract(
     ADDRESSES.IdentityRegistry,
     IdentityRegistryABI,
     provider
   );
-  return identityRegistry.hasIdentity(user);
+  return identityRegistry.getIdentity(user);
 }
 
 /* ============================================================
-   LEGAL REGISTRY FUNCTIONS
+   LEGAL REGISTRY
 ============================================================ */
 
-export async function requestAsset(privateKey, jurisdiction, documentURI) {
+export async function requestAsset(privateKey, countryCode, documentURI) {
   const { legalRegistry } = getContracts(privateKey);
   try {
-    const tx = await legalRegistry.requestAsset(jurisdiction, documentURI);
+    const tx = await legalRegistry.requestAsset(countryCode, documentURI);
     const receipt = await tx.wait();
 
     const event = receipt.logs
-      .map(l => {
+      .map(log => {
         try {
-          return legalRegistry.interface.parseLog(l);
+          return legalRegistry.interface.parseLog(log);
         } catch {
           return null;
         }
@@ -150,18 +193,35 @@ export async function approveAsset(privateKey, assetId) {
   }
 }
 
-export async function getTotalAssets() {
-  const legalRegistry = new ethers.Contract(
-    ADDRESSES.LegalRegistry,
-    LegalRegistryABI,
-    provider
-  );
-  return legalRegistry.getTotalAssets();
-}
-
 /* ============================================================
-   RWA MANAGER FUNCTIONS
+   RWA MANAGER
 ============================================================ */
+
+export async function createRWA(
+  privateKey,
+  {
+    name,
+    symbol,
+    assetId,
+    initialOwners,
+    mintAmounts,
+  }
+) {
+  const { rwaManager } = getContracts(privateKey);
+  try {
+    const tx = await rwaManager.createRWA(
+      name,
+      symbol,
+      assetId,
+      initialOwners,
+      mintAmounts
+    );
+    const receipt = await tx.wait();
+    return receipt;
+  } catch (err) {
+    throw decodeError(err);
+  }
+}
 
 export async function getRWAToken(assetId) {
   const rwaManager = new ethers.Contract(
@@ -172,18 +232,25 @@ export async function getRWAToken(assetId) {
   return rwaManager.rwaByAsset(assetId);
 }
 
-export async function createRWA(privateKey, params) {
-  const { rwaManager } = getContracts(privateKey);
+const { legalRegistry } = getContracts("0x63bd3e1ca3f56d1f21f2cc19ddcfbe4e844d0b0bba747f4ab3d4486337d97974");
+// const asset = await legalRegistry.getAsset(1);
+// console.log("Asset:", asset);
 
-  try {
-    const tx = await rwaManager.createRWA(params);
-    const receipt = await tx.wait();
-    return receipt;
-  } catch (err) {
-    throw decodeError(err, [
-      "error IdentityRequired(address)",
-      "error InvalidDistribution()",
-      "error ZeroAddress()",
-    ]);
-  }
-}
+const { identityRegistry } = getContracts("0x63bd3e1ca3f56d1f21f2cc19ddcfbe4e844d0b0bba747f4ab3d4486337d97974");
+// for (const owner of [
+//       "0xcf94c9757FB442C972A83A72f7592Ba853751FC8",
+//       "0x30086497C5e5F191878f9e06505D328c2b043E88",
+//       "0x0645D9eF7E19fb6D1D7062a842f01BD69E3db23F"
+//     ]) {
+//   const identity = await identityRegistry.getIdentity(owner);
+//   console.log(`Owner ${owner} country code:`, identity.countryCode);
+// }
+
+
+const asset = await legalRegistry.getAsset(1);
+console.log("Asset country code:", asset[1]);
+
+const identity = await identityRegistry.getIdentity("0xcf94c9757FB442C972A83A72f7592Ba853751FC8");
+console.log("Owner country code:", identity.countryCode)
+
+
