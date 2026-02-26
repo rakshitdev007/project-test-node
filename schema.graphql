@@ -1,0 +1,5 @@
+type Holder @entity(immutable: false) {
+    id: ID!
+    balance: BigInt!
+    updatedAt: BigInt!
+}

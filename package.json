@@ -11,6 +11,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@graphprotocol/graph-ts": "^0.38.2",
     "amqplib": "^0.10.9",
     "dotenv": "^17.2.3",
     "ethers": "^6.15.0",
@@ -21,5 +22,8 @@
     "nodemon": "^3.1.11",
     "socket.io-client": "^4.8.3",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "assemblyscript": "^0.28.9"
   }
 }

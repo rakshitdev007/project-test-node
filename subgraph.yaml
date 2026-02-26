@@ -1,0 +1,26 @@
+specVersion: 0.0.5
+
+schema:
+  file: ./schema.graphql
+
+dataSources:
+  - kind: ethereum
+    name: ERC20
+    network: mainnet
+    source:
+      address: "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+      abi: ERC20
+      startBlock: 4634748
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - Holder
+      abis:
+        - name: ERC20
+          file: ./abi/ERC20.json
+      eventHandlers:
+        - event: Transfer(indexed address,indexed address,uint256)
+          handler: handleTransfer
+      file: ./mapping.ts
